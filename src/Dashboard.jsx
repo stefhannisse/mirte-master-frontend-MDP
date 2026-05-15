@@ -281,7 +281,7 @@ export default function RosDashboard() {
 
   const mapHz = useTopicHz("/map");
   const scanHz = useTopicHz("/scan");
-  const odomHz = useTopicHz("/odometry/filtered");
+  const odomHz = useTopicHz("/mirte_base_controller/odom");
   const tfHz = useTopicHz("/tf");
 
   useEffect(() => {
@@ -309,7 +309,7 @@ export default function RosDashboard() {
     });
     subs.push(scanTopic);
 
-    const odomTopic = new ROSLIB.Topic({ ros, name: "/odometry/filtered", messageType: "nav_msgs/Odometry" });
+    const odomTopic = new ROSLIB.Topic({ ros, name: "/mirte_base_controller/odom", messageType: "nav_msgs/Odometry" });
     odomTopic.subscribe((msg) => {
       odomHz.tick();
       const { x, y } = msg.pose.pose.position;
@@ -446,7 +446,7 @@ export default function RosDashboard() {
             <SectionLabel>topics</SectionLabel>
             <TopicRow name="/map" hz={mapHz.hz} active={mapHz.hz > 0} />
             <TopicRow name="/scan" hz={scanHz.hz} active={scanHz.hz > 0} />
-            <TopicRow name="/odometry/filtered" hz={odomHz.hz} active={odomHz.hz > 0} />
+            <TopicRow name="/mirte_base_controller/odom" hz={odomHz.hz} active={odomHz.hz > 0} />
             <TopicRow name="/tf" hz={tfHz.hz} active={tfHz.hz > 0} />
           </div>
 
