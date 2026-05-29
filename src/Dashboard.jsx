@@ -53,6 +53,7 @@ export default function RosDashboard() {
   const [wsUrl, setWsUrl]       = useState(DEFAULT_WS);
   const [inputUrl, setInputUrl] = useState(DEFAULT_WS);
   const [view, setView]         = useState("map");
+  const [simMode, setSimMode]   = useState(false);
   const { ros, socket, status, connect, disconnect } = useRos(wsUrl);
 
   const handleConnect = () => {
@@ -106,7 +107,19 @@ export default function RosDashboard() {
         ))}
 
         {/* Connection controls */}
-        <div style={{ flex: 1, display: "flex", gap: 8, padding: "0 16px", justifyContent: "flex-end", alignItems: "center", maxWidth: 480, marginLeft: "auto" }}>
+        <div style={{ flex: 1, display: "flex", gap: 8, padding: "0 16px", justifyContent: "flex-end", alignItems: "center", maxWidth: 540, marginLeft: "auto" }}>
+          <button
+            onClick={() => setSimMode(m => !m)}
+            style={{
+              background: simMode ? COLORS.accentDim : "transparent",
+              border: `0.5px solid ${simMode ? COLORS.accent : COLORS.border}`,
+              borderRadius: 4, color: simMode ? COLORS.accent : COLORS.textMuted,
+              fontSize: 12, padding: "4px 14px", cursor: "pointer",
+              fontFamily: "monospace", transition: "all 0.2s", whiteSpace: "nowrap",
+            }}
+          >
+            {simMode ? "● sim" : "sim"}
+          </button>
           <input
             value={inputUrl}
             onChange={(e) => setInputUrl(e.target.value)}
@@ -143,7 +156,7 @@ export default function RosDashboard() {
       {/* ── Active View ─────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {view === "map"
-          ? <MapSensorsView ros={ros} status={status} />
+          ? <MapSensorsView ros={ros} status={status} simMode={simMode} />
           : <RobotControlView socket={socket} />
         }
       </div>
