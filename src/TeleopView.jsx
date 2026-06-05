@@ -1,11 +1,9 @@
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import { useRobotScene } from "./useRobotScene.js";
 import { useColors } from "./shared.jsx";
 
 const DEG = Math.PI / 180;
 
-// Mecanum drive speed signs per direction
-// [FL, FR, RL, RR]
 const DRIVE_VECTORS = {
   forward:     { vx:  0.3, vy: 0,    wz: 0,    wheels: [ 1,  1,  1,  1] },
   backward:    { vx: -0.3, vy: 0,    wz: 0,    wheels: [-1, -1, -1, -1] },
@@ -58,46 +56,49 @@ const BUTTON_LABELS = {
   rotateCW: "↻", rotateCCW: "↺", stop: "■",
 };
 
-export default function RobotControlView({ socket }) {
+export default function TeleopView({ socket, darkMode }) {
   const COLORS = useColors();
   const mountRef = useRef(null);
   const sceneControlsRef = useRef(null);
   const [activeDir, setActiveDir] = useState(null);
+  const [armState, setArmState] = useState({ base: 0, shoulder: 0, elbow: 0, wrist: 0, gripper: 0 });
 
-  const [armState, setArmState] = useState({
-    base: 0, shoulder: 0, elbow: 0, wrist: 0, gripper: 0,
-  });
+  const { driveRef, rendererRef, groundMatRef, gridRef } = useRobotScene(mountRef, sceneControlsRef);
 
-  const { driveRef } = useRobotScene(mountRef, sceneControlsRef);
+  // Update Three.js scene colors when theme changes
+  useEffect(() => {
+    const bgHex = parseInt(COLORS.bg.replace("#", ""), 16);
+    const groundHex = parseInt(darkMode ? "#1a1d26" : "#e8eaf0", 16);
+    const gridHex = parseInt(darkMode ? "#1e2330" : "#d0d5e0", 16);
+
+    if (rendererRef.current) rendererRef.current.setClearColor(bgHex);
+    if (groundMatRef.current) groundMatRef.current.color.setHex(groundHex);
+    if (gridRef.current) {
+      gridRef.current.material.color?.setHex(gridHex);
+      // GridHelper has two materials for lines and center
+      if (Array.isArray(gridRef.current.material)) {
+        gridRef.current.material.forEach(m => m.color?.setHex(gridHex));
+      }
+    }
+  }, [darkMode, COLORS, rendererRef, groundMatRef, gridRef]);
 
   const updateArm = useCallback((key, deg) => {
     setArmState((prev) => {
       const next = { ...prev, [key]: deg };
-
-      // Apply to Three.js arm
       const arm = sceneControlsRef.current?.arm;
       if (arm) {
-        arm.armBase.rotation.y   = next.base     * DEG;
-        arm.shoulder.rotation.x  = next.shoulder * DEG;
-        arm.elbow.rotation.x     = next.elbow    * DEG;
-        arm.wrist.rotation.x     = next.wrist    * DEG;
-        const spread = next.gripper * 0.001; // mm → m
+        arm.armBase.rotation.y  = next.base     * DEG;
+        arm.shoulder.rotation.x = next.shoulder * DEG;
+        arm.elbow.rotation.x    = next.elbow    * DEG;
+        arm.wrist.rotation.x    = next.wrist    * DEG;
+        const spread = next.gripper * 0.001;
         if (arm.fingerL) arm.fingerL.position.x = -0.014 - spread;
         if (arm.fingerR) arm.fingerR.position.x =  0.014 + spread;
       }
-
-      // Publish joint states
       publish(socket, "/mirte/arm/joint_states", {
         name: ["base", "shoulder", "elbow", "wrist", "gripper"],
-        position: [
-          next.base     * DEG,
-          next.shoulder * DEG,
-          next.elbow    * DEG,
-          next.wrist    * DEG,
-          next.gripper  * 0.001,
-        ],
+        position: [next.base * DEG, next.shoulder * DEG, next.elbow * DEG, next.wrist * DEG, next.gripper * 0.001],
       });
-
       return next;
     });
   }, [socket]);
@@ -106,10 +107,7 @@ export default function RobotControlView({ socket }) {
     setActiveDir(dir);
     const vec = DRIVE_VECTORS[dir] ?? DRIVE_VECTORS.stop;
     driveRef.current = { fl: vec.wheels[0], fr: vec.wheels[1], rl: vec.wheels[2], rr: vec.wheels[3] };
-    publish(socket, "/cmd_vel", {
-      linear:  { x: vec.vx, y: vec.vy, z: 0 },
-      angular: { z: vec.wz },
-    });
+    publish(socket, "/cmd_vel", { linear: { x: vec.vx, y: vec.vy, z: 0 }, angular: { z: vec.wz } });
   }, [socket, driveRef]);
 
   const handleDriveStop = useCallback(() => {
@@ -120,7 +118,7 @@ export default function RobotControlView({ socket }) {
 
   return (
     <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-      {/* Three.js canvas area */}
+      {/* Three.js canvas */}
       <div ref={mountRef} style={{ flex: 1, position: "relative", background: COLORS.bg }} />
 
       {/* Control sidebar */}
@@ -137,7 +135,7 @@ export default function RobotControlView({ socket }) {
           <div style={{ fontSize: 10, color: COLORS.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12, paddingBottom: 4, borderBottom: `0.5px solid ${COLORS.border}` }}>
             arm control
           </div>
-          <ArmSlider label="Base rotation" min={-180} max={180} value={armState.base}     onChange={(v) => updateArm("base", v)} />
+          <ArmSlider label="Base rotation"  min={-180} max={180} value={armState.base}     onChange={(v) => updateArm("base", v)} />
           <ArmSlider label="Shoulder pitch" min={-90}  max={90}  value={armState.shoulder} onChange={(v) => updateArm("shoulder", v)} />
           <ArmSlider label="Elbow pitch"    min={-120} max={120} value={armState.elbow}    onChange={(v) => updateArm("elbow", v)} />
           <ArmSlider label="Wrist pitch"    min={-90}  max={90}  value={armState.wrist}    onChange={(v) => updateArm("wrist", v)} />
@@ -163,15 +161,11 @@ export default function RobotControlView({ socket }) {
                   onTouchStart={(e) => { e.preventDefault(); handleDrive(dir); }}
                   onTouchEnd={isStop ? undefined : handleDriveStop}
                   style={{
-                    padding: "8px 0",
-                    fontSize: 16,
-                    cursor: "pointer",
-                    borderRadius: 4,
+                    padding: "8px 0", fontSize: 16, cursor: "pointer", borderRadius: 4,
                     border: `0.5px solid ${isActive ? COLORS.accent : COLORS.border}`,
-                    background: isActive ? COLORS.accentDim : isStop ? "#1e1e2a" : "transparent",
+                    background: isActive ? COLORS.accentDim : isStop ? COLORS.surface : "transparent",
                     color: isActive ? COLORS.accent : isStop ? COLORS.warn : COLORS.text,
-                    fontFamily: "monospace",
-                    transition: "all 0.1s",
+                    fontFamily: "monospace", transition: "all 0.1s",
                   }}
                 >
                   {BUTTON_LABELS[dir]}
@@ -184,7 +178,7 @@ export default function RobotControlView({ socket }) {
           </div>
         </div>
 
-        {/* Socket status note */}
+        {/* Socket status */}
         <div style={{ fontSize: 10, color: COLORS.textDim, borderTop: `0.5px solid ${COLORS.border}`, paddingTop: 10 }}>
           {socket && socket.readyState === WebSocket.OPEN
             ? <span style={{ color: COLORS.accent }}>● rosbridge connected</span>

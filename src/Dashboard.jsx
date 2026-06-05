@@ -5,9 +5,10 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as ROSLIB from "roslib";
-import { COLORS, StatusDot } from "./shared.jsx";
-import MapSensorsView from "./MapSensorsView.jsx";
-import RobotControlView from "./RobotControlView.jsx";
+import { ThemeProvider, useColors, StatusDot } from "./shared.jsx";
+import MissionControlView from "./MissionControlView.jsx";
+import TeleopView from "./TeleopView.jsx";
+import SensorsView from "./SensorsView.jsx";
 
 const DEFAULT_WS = "ws://localhost:9090";
 
@@ -23,7 +24,6 @@ function useRos(wsUrl) {
     rosRef.current = ros;
     ros.on("connection", () => {
       setStatus("connected");
-      // Grab the underlying WebSocket from roslibjs
       socketRef.current = ros.socket;
     });
     ros.on("error", () => setStatus("error"));
@@ -45,14 +45,39 @@ function useRos(wsUrl) {
 }
 
 const NAV_ITEMS = [
-  { id: "map",    label: "Map & Sensors" },
-  { id: "robot",  label: "Robot Control" },
+  { id: "mission", label: "Mission Control" },
+  { id: "teleop",  label: "Tele-op" },
+  { id: "sensors", label: "Sensors" },
 ];
 
-export default function RosDashboard() {
+function ThemeToggle({ dark, onToggle }) {
+  const COLORS = useColors();
+  return (
+    <button
+      onClick={onToggle}
+      title={dark ? "Switch to light mode" : "Switch to dark mode"}
+      style={{
+        display: "flex", alignItems: "center", gap: 7,
+        background: "transparent",
+        border: `0.5px solid ${COLORS.border}`,
+        borderRadius: 4, padding: "4px 10px",
+        cursor: "pointer", fontFamily: "monospace",
+        fontSize: 11, letterSpacing: "0.05em",
+        color: COLORS.textMuted, whiteSpace: "nowrap",
+        transition: "color 0.15s, border-color 0.15s",
+      }}
+    >
+      <span>{dark ? "☀" : "☾"}</span>
+      <span>{dark ? "light" : "dark"}</span>
+    </button>
+  );
+}
+
+function RosDashboardInner({ darkMode, setDarkMode }) {
+  const COLORS = useColors();
   const [wsUrl, setWsUrl]       = useState(DEFAULT_WS);
   const [inputUrl, setInputUrl] = useState(DEFAULT_WS);
-  const [view, setView]         = useState("map");
+  const [view, setView]         = useState("mission");
   const [simMode, setSimMode]   = useState(false);
   const { ros, socket, status, connect, disconnect } = useRos(wsUrl);
 
@@ -145,20 +170,24 @@ export default function RosDashboard() {
         </div>
 
         {/* Live badge */}
-        <div style={{ padding: "0 16px", fontSize: 11, color: COLORS.textMuted, whiteSpace: "nowrap" }}>
+        <div style={{ padding: "0 12px", fontSize: 11, color: COLORS.textMuted, whiteSpace: "nowrap" }}>
           {status === "connected"    && <span style={{ color: COLORS.accent }}>● live</span>}
           {status === "connecting"   && <span style={{ color: COLORS.warn }}>● connecting</span>}
           {status === "error"        && <span style={{ color: "#e24b4a" }}>● error</span>}
           {status === "disconnected" && <span>○ offline</span>}
         </div>
+
+        {/* Theme toggle */}
+        <div style={{ padding: "0 12px", borderLeft: `0.5px solid ${COLORS.border}`, height: "100%", display: "flex", alignItems: "center" }}>
+          <ThemeToggle dark={darkMode} onToggle={() => setDarkMode(d => !d)} />
+        </div>
       </div>
 
       {/* ── Active View ─────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {view === "map"
-          ? <MapSensorsView ros={ros} status={status} simMode={simMode} />
-          : <RobotControlView socket={socket} />
-        }
+        {view === "mission" && <MissionControlView ros={ros} status={status} simMode={simMode} />}
+        {view === "teleop"  && <TeleopView socket={socket} darkMode={darkMode} />}
+        {view === "sensors" && <SensorsView ros={ros} status={status} simMode={simMode} />}
       </div>
 
       <style>{`
@@ -174,5 +203,14 @@ export default function RosDashboard() {
         ::-webkit-scrollbar-thumb { background: ${COLORS.border}; border-radius: 2px; }
       `}</style>
     </div>
+  );
+}
+
+export default function RosDashboard() {
+  const [darkMode, setDarkMode] = useState(false);
+  return (
+    <ThemeProvider dark={darkMode}>
+      <RosDashboardInner darkMode={darkMode} setDarkMode={setDarkMode} />
+    </ThemeProvider>
   );
 }

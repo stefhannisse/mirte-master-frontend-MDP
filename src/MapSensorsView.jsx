@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import * as ROSLIB from "roslib";
-import { MapCanvas, ScanCanvas, TopicRow, StatCard, SectionLabel, useTopicHz, COLORS } from "./shared.jsx";
+import { MapCanvas, ScanCanvas, TopicRow, StatCard, SectionLabel, useTopicHz, useColors } from "./shared.jsx";
 
 // ── Simulation data ──────────────────────────────────────────────────────────
 
@@ -51,6 +51,7 @@ function simRaycast(px, py, angle) {
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function MapSensorsView({ ros, status, simMode }) {
+  const COLORS = useColors();
   const [mapMsg, setMapMsg]         = useState(null);
   const [scanRanges, setScanRanges] = useState([]);
   const [scanMeta, setScanMeta]     = useState(null);
