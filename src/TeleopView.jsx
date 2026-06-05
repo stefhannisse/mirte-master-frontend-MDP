@@ -7,15 +7,15 @@ const DEG = Math.PI / 180;
 const DRIVE_VECTORS = {
   forward:     { vx:  0.3, vy: 0,    wz: 0,    wheels: [ 1,  1,  1,  1] },
   backward:    { vx: -0.3, vy: 0,    wz: 0,    wheels: [-1, -1, -1, -1] },
-  left:        { vx: 0,   vy:  0.3,  wz: 0,    wheels: [-1,  1,  1, -1] },
-  right:       { vx: 0,   vy: -0.3,  wz: 0,    wheels: [ 1, -1, -1,  1] },
+  left:        { vx: 0,    vy:  0.3,  wz: 0,    wheels: [-1,  1,  1, -1] },
+  right:       { vx: 0,    vy: -0.3,  wz: 0,    wheels: [ 1, -1, -1,  1] },
   fwdLeft:     { vx:  0.3, vy:  0.3, wz: 0,    wheels: [ 0,  1,  1,  0] },
   fwdRight:    { vx:  0.3, vy: -0.3, wz: 0,    wheels: [ 1,  0,  0,  1] },
   backLeft:    { vx: -0.3, vy:  0.3, wz: 0,    wheels: [ 0, -1, -1,  0] },
   backRight:   { vx: -0.3, vy: -0.3, wz: 0,    wheels: [-1,  0,  0, -1] },
-  rotateCW:    { vx: 0,   vy: 0,    wz: -0.5,  wheels: [ 1, -1,  1, -1] },
-  rotateCCW:   { vx: 0,   vy: 0,    wz:  0.5,  wheels: [-1,  1, -1,  1] },
-  stop:        { vx: 0,   vy: 0,    wz: 0,     wheels: [ 0,  0,  0,  0] },
+  rotateCW:    { vx: 0,    vy: 0,    wz: -0.5, wheels: [ 1, -1,  1, -1] },
+  rotateCCW:   { vx: 0,    vy: 0,    wz:  0.5, wheels: [-1,  1, -1,  1] },
+  stop:        { vx: 0,    vy: 0,    wz: 0,    wheels: [ 0,  0,  0,  0] },
 };
 
 function publish(socket, topic, msg) {
@@ -75,33 +75,76 @@ export default function TeleopView({ socket, darkMode }) {
     if (groundMatRef.current) groundMatRef.current.color.setHex(groundHex);
     if (gridRef.current) {
       gridRef.current.material.color?.setHex(gridHex);
-      // GridHelper has two materials for lines and center
       if (Array.isArray(gridRef.current.material)) {
         gridRef.current.material.forEach(m => m.color?.setHex(gridHex));
       }
     }
   }, [darkMode, COLORS, rendererRef, groundMatRef, gridRef]);
 
+  // Modified to cleanly target /mirte_arm_controller/joint_state
   const updateArm = useCallback((key, deg) => {
-    setArmState((prev) => {
-      const next = { ...prev, [key]: deg };
-      const arm = sceneControlsRef.current?.arm;
-      if (arm) {
-        arm.armBase.rotation.y  = next.base     * DEG;
-        arm.shoulder.rotation.x = next.shoulder * DEG;
-        arm.elbow.rotation.x    = next.elbow    * DEG;
-        arm.wrist.rotation.x    = next.wrist    * DEG;
-        const spread = next.gripper * 0.001;
-        if (arm.fingerL) arm.fingerL.position.x = -0.014 - spread;
-        if (arm.fingerR) arm.fingerR.position.x =  0.014 + spread;
-      }
-      publish(socket, "/mirte/arm/joint_states", {
-        name: ["base", "shoulder", "elbow", "wrist", "gripper"],
-        position: [next.base * DEG, next.shoulder * DEG, next.elbow * DEG, next.wrist * DEG, next.gripper * 0.001],
+  setArmState((prev) => {
+    const next = { ...prev, [key]: deg };
+    const arm = sceneControlsRef.current?.arm;
+    
+    // 1. Update the local 3D Three.js scene for visual feedback
+    if (arm) {
+      arm.armBase.rotation.y  = next.base     * DEG;
+      arm.shoulder.rotation.x = next.shoulder * DEG;
+      arm.elbow.rotation.x    = next.elbow    * DEG;
+      arm.wrist.rotation.x    = next.wrist    * DEG;
+      const spread = next.gripper * 0.001;
+      if (arm.fingerL) arm.fingerL.position.x = -0.014 - spread;
+      if (arm.fingerR) arm.fingerR.position.x =  0.014 + spread;
+    }
+
+    // 2. Format payload to explicitly match rosbridge specification
+    // Ensure we wrap it inside the schema rosbridge expects
+    console.log(socket)
+    // Ensure you pass the 'ros' object instance down as a prop, or use your current hook's variable
+    if (socket && socket.isConnected) {
+      console.log("Sending raw JSON frame via roslibjs internal pipeline...");
+      
+      socket.callOnConnection({
+        op: "publish",
+        topic: "/mirte_master_arm_controller/joint_trajectory",
+        type: "trajectory_msgs/msg/JointTrajectory", 
+        msg: {
+          header: {
+            stamp: { sec: 0, nanosec: 0 },
+            frame_id: ""
+          },
+          joint_names: [
+            "shoulder_pan_joint",
+            "shoulder_lift_joint",
+            "elbow_joint",
+            "wrist_joint"
+          ],
+          points: [
+            {
+              positions: [
+                next.base * DEG,       
+                next.shoulder * DEG,   
+                next.elbow * DEG,      
+                next.wrist * DEG       
+              ],
+              velocities: [0.0, 0.0, 0.0, 0.0], 
+              accelerations: [0.0, 0.0, 0.0, 0.0],
+              effort: [],
+              time_from_start: { sec: 0, nanosec: 200000000 } 
+            }
+          ]
+        }
       });
-      return next;
-    });
-  }, [socket]);
+    }
+
+    return next;
+  });
+}, [socket]);
+
+  useEffect(() => {
+    console.log(armState)
+  }, [armState])
 
   const handleDrive = useCallback((dir) => {
     setActiveDir(dir);

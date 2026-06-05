@@ -14,7 +14,8 @@ const DEFAULT_WS = "ws://localhost:9090";
 
 function useRos(wsUrl) {
   const rosRef = useRef(null);
-  const socketRef = useRef(null);
+  // 1. Change socket from a Ref to a State hook
+  const [socket, setSocket] = useState(null); 
   const [status, setStatus] = useState("disconnected");
 
   const connect = useCallback((url) => {
@@ -22,18 +23,28 @@ function useRos(wsUrl) {
     setStatus("connecting");
     const ros = new ROSLIB.Ros({ url });
     rosRef.current = ros;
+    
     ros.on("connection", () => {
       setStatus("connected");
-      socketRef.current = ros.socket;
+      console.log("socket is on", ros);
+      // 2. Update state so React knows to trigger a full dashboard re-render
+      setSocket(ros); 
     });
-    ros.on("error", () => setStatus("error"));
-    ros.on("close", () => { setStatus("disconnected"); socketRef.current = null; });
+    
+    ros.on("error", () => {
+      setStatus("error");
+    });
+    
+    ros.on("close", () => { 
+      setStatus("disconnected"); 
+      setSocket(null); // 3. Clear state on close
+    });
   }, []);
 
   const disconnect = useCallback(() => {
     if (rosRef.current) rosRef.current.close();
     setStatus("disconnected");
-    socketRef.current = null;
+    setSocket(null); // 4. Clear state on manual disconnect
   }, []);
 
   useEffect(() => {
@@ -41,7 +52,8 @@ function useRos(wsUrl) {
     return () => { if (rosRef.current) rosRef.current.close(); };
   }, []);
 
-  return { ros: rosRef.current, socket: socketRef.current, status, connect, disconnect };
+  // 5. Explicitly return the state variable 'socket'
+  return { ros: rosRef.current, socket, status, connect, disconnect };
 }
 
 const NAV_ITEMS = [
@@ -80,6 +92,10 @@ function RosDashboardInner({ darkMode, setDarkMode }) {
   const [view, setView]         = useState("mission");
   const [simMode, setSimMode]   = useState(false);
   const { ros, socket, status, connect, disconnect } = useRos(wsUrl);
+
+  useEffect(() => {
+    console.log(socket, status)
+  }, [socket, status])
 
   const handleConnect = () => {
     if (status === "connected") disconnect();
