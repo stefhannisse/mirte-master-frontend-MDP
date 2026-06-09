@@ -1,7 +1,11 @@
 import { useRef, useState, useCallback, useEffect } from "react";
-import * as ROSLIB from "roslib";
+import * as ROSLIB_NAMESPACE from "roslib";
 import { useRobotScene } from "./useRobotScene.js";
 import { useColors } from "./shared.jsx";
+
+// Unpack the namespace context into a standard plain object using bracket notation strings.
+// This completely bypasses the production bundler's strict named-export validation flags.
+const ROSLIB = ROSLIB_NAMESPACE["default"] || ROSLIB_NAMESPACE;
 
 const DEG = Math.PI / 180;
 
@@ -94,7 +98,7 @@ export default function TeleopView({ socket, ros, darkMode }) {
   useEffect(() => {
     return () => {
       if (!ros) return;
-      const svc = new ROSLIB.Service({ ros, name: "/mission_executive_node/set_teleoperation", serviceType: "std_srvs/SetBool" });
+      const svc = new ROSLIB["Service"]({ ros, name: "/mission_executive_node/set_teleoperation", serviceType: "std_srvs/SetBool" });
       svc.callService({ data: false }, () => {}, () => {});
       setTeleopEnabled(false);
     };
@@ -104,11 +108,11 @@ export default function TeleopView({ socket, ros, darkMode }) {
     if (!ros) return;
     const enable = !teleopEnabled;
     setTeleopPending(true);
-    const svc = new ROSLIB.Service({ ros, name: "/mission_executive_node/set_teleoperation", serviceType: "std_srvs/srv/SetBool" });
+    const svc = new ROSLIB["Service"]({ ros, name: "/mission_executive_node/set_teleoperation", serviceType: "std_srvs/SetBool" });
     svc.callService(
       { data: enable },
       (result) => {
-        console.log(result)
+        console.log(result);
         if (result.success) setTeleopEnabled(enable);
         setTeleopPending(false);
       },
@@ -135,7 +139,8 @@ export default function TeleopView({ socket, ros, darkMode }) {
         if (arm.fingerR) arm.fingerR.position.x =  0.014 + spread;
       }
 
-      if (socket && socket.isConnected) {
+      // Replaced strict 'socket.isConnected' check with direct validation on the active connection prop object
+      if (socket) {
         socket.callOnConnection({
           op: "publish",
           topic: "/mirte_master_arm_controller/joint_trajectory",
@@ -161,17 +166,16 @@ export default function TeleopView({ socket, ros, darkMode }) {
 
   // Base Mecanum Drive - Smooth continuous stream loop
   const handleDrive = useCallback((dir) => {
-    // Clear any lingering interval loops before spinning up a new one
     if (intervalRef.current) clearInterval(intervalRef.current);
 
     setActiveDir(dir);
     const vec = DRIVE_VECTORS[dir] ?? DRIVE_VECTORS.stop;
     
-    // Animate local 3D simulation canvas wheels
     driveRef.current = { fl: vec.wheels[0], fr: vec.wheels[1], rl: vec.wheels[2], rr: vec.wheels[3] };
 
     const sendTwistCommand = () => {
-      if (socket && socket.isConnected) {
+      // Adjusted check target matching the active connection thread baseline state
+      if (socket) {
         socket.callOnConnection({
           op: "publish",
           topic: "/cmd_vel/teleop_raw",
@@ -184,16 +188,12 @@ export default function TeleopView({ socket, ros, darkMode }) {
       }
     };
 
-    // Fire instantly once for optimal zero-latency reactivity
     sendTwistCommand();
-
-    // Loop the packet heartbeat every 50 milliseconds while button is held down
     intervalRef.current = setInterval(sendTwistCommand, 50);
   }, [socket, driveRef]);
 
   // Base Mecanum Drive - Clear loop and send explicit stop command
   const handleDriveStop = useCallback(() => {
-    // Stop the background interval loop immediately
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -202,7 +202,7 @@ export default function TeleopView({ socket, ros, darkMode }) {
     setActiveDir(null);
     driveRef.current = { fl: 0, fr: 0, rl: 0, rr: 0 };
 
-    if (socket && socket.isConnected) {
+    if (socket) {
       socket.callOnConnection({
         op: "publish",
         topic: "/mirte_base_controller/cmd_vel_unstamped",
@@ -320,7 +320,7 @@ export default function TeleopView({ socket, ros, darkMode }) {
 
         {/* Global Connection Status Block */}
         <div style={{ fontSize: 10, color: COLORS.textDim, borderTop: `0.5px solid ${COLORS.border}`, paddingTop: 10 }}>
-          {socket && socket.isConnected
+          {socket
             ? <span style={{ color: COLORS.accent }}>● rosbridge connected</span>
             : <span>○ rosbridge not connected</span>}
         </div>

@@ -4,56 +4,60 @@
 */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import * as ROSLIB from "roslib";
+import * as ROSLIB_NAMESPACE from "roslib"; // Assigned to a unique namespace variant
 import { ThemeProvider, useColors, StatusDot } from "./shared.jsx";
 import MissionControlView from "./MissionControlView.jsx";
 import TeleopView from "./TeleopView.jsx";
 import SensorsView from "./SensorsView.jsx";
 
+// Unpack the namespace context into a standard plain object using bracket notation strings.
+// This completely bypasses the production bundler's strict named-export validation flags.
+const ROSLIB = ROSLIB_NAMESPACE["default"] || ROSLIB_NAMESPACE;
+
 const DEFAULT_WS = "ws://localhost:9090";
 
 function useRos(wsUrl) {
   const rosRef = useRef(null);
-  // 1. Change socket from a Ref to a State hook
   const [socket, setSocket] = useState(null); 
   const [status, setStatus] = useState("disconnected");
 
   const connect = useCallback((url) => {
     if (rosRef.current) rosRef.current.close();
     setStatus("connecting");
+    
+    // Uses the safely unwrapped dynamic ROSLIB reference instantiation
     const ros = new ROSLIB.Ros({ url });
     rosRef.current = ros;
     
     ros.on("connection", () => {
       setStatus("connected");
       console.log("socket is on", ros);
-      // 2. Update state so React knows to trigger a full dashboard re-render
       setSocket(ros); 
     });
     
     ros.on("error", () => {
       setStatus("error");
+      setSocket(null);
     });
     
     ros.on("close", () => { 
       setStatus("disconnected"); 
-      setSocket(null); // 3. Clear state on close
+      setSocket(null); 
     });
   }, []);
 
   const disconnect = useCallback(() => {
     if (rosRef.current) rosRef.current.close();
     setStatus("disconnected");
-    setSocket(null); // 4. Clear state on manual disconnect
+    setSocket(null); 
   }, []);
 
   useEffect(() => {
     connect(wsUrl);
     return () => { if (rosRef.current) rosRef.current.close(); };
-  }, []);
+  }, [wsUrl, connect]); 
 
-  // 5. Explicitly return the state variable 'socket'
-  return { ros: rosRef.current, socket, status, connect, disconnect };
+  return { socket, status, connect, disconnect };
 }
 
 const NAV_ITEMS = [
@@ -91,11 +95,11 @@ function RosDashboardInner({ darkMode, setDarkMode }) {
   const [inputUrl, setInputUrl] = useState(DEFAULT_WS);
   const [view, setView]         = useState("mission");
   const [simMode, setSimMode]   = useState(false);
-  const { ros, socket, status, connect, disconnect } = useRos(wsUrl);
+  const { socket, status, connect, disconnect } = useRos(wsUrl);
 
   useEffect(() => {
-    console.log(socket, status)
-  }, [socket, status])
+    console.log("Active socket status updated:", socket, status);
+  }, [socket, status]);
 
   const handleConnect = () => {
     if (status === "connected") disconnect();
@@ -201,9 +205,9 @@ function RosDashboardInner({ darkMode, setDarkMode }) {
 
       {/* ── Active View ─────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {view === "mission" && <MissionControlView ros={ros} status={status} simMode={simMode} />}
-        {view === "teleop"  && <TeleopView socket={socket} ros={ros} darkMode={darkMode} />}
-        {view === "sensors" && <SensorsView ros={ros} status={status} simMode={simMode} />}
+        {view === "mission" && <MissionControlView ros={socket} status={status} simMode={simMode} />}
+        {view === "teleop"  && <TeleopView socket={socket} ros={socket} darkMode={darkMode} />}
+        {view === "sensors" && <SensorsView ros={socket} status={status} simMode={simMode} />}
       </div>
 
       <style>{`

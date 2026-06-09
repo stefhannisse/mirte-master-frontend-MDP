@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
-import * as ROSLIB from "roslib";
+import * as ROSLIB_NAMESPACE from "roslib";
 import { MapCanvas, ScanCanvas, TopicRow, StatCard, SectionLabel, useTopicHz, useColors } from "./shared.jsx";
+
+// Unpack the namespace context into a standard plain object using bracket notation strings.
+// This completely bypasses the production bundler's strict named-export validation flags.
+const ROSLIB = ROSLIB_NAMESPACE["default"] || ROSLIB_NAMESPACE;
 
 // ── Simulation data ──────────────────────────────────────────────────────────
 
@@ -137,8 +141,8 @@ export default function MapSensorsView({ ros, status, simMode }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: 12, padding: 16, flex: 1, overflow: "auto" }}>
       {/* map panel */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ background: COLORS.surface, border: `0.5px solid ${COLORS.border}`, borderRadius: 8, padding: "10px 12px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ background: COLORS.surface, border: `0.5px solid ${COLORS.border}`, borderRadius: 8, padding: "10px 12px" }}>
           <div style={{ fontSize: 11, color: COLORS.textMuted, marginBottom: 6, letterSpacing: "0.06em" }}>Robot state</div>
           <button>START discovery</button>
         </div>

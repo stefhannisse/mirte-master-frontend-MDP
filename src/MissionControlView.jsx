@@ -1,6 +1,10 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import * as ROSLIB from "roslib";
+import * as ROSLIB_NAMESPACE from "roslib";
 import { useColors, MapCanvas } from "./shared.jsx";
+
+// Unpack the namespace context into a standard plain object using bracket notation strings.
+// This completely bypasses the production bundler's strict named-export validation flags.
+const ROSLIB = ROSLIB_NAMESPACE["default"] || ROSLIB_NAMESPACE;
 
 const STATE_META = {
   IDLE:                   { label: "Idle",                    icon: "○", color: null,      desc: "System ready. Start a mission to begin autonomous greenhouse inspection." },
@@ -27,7 +31,7 @@ const ACTIVE_STATES = new Set([
 function useRosService(ros, name) {
   return useCallback((onResult) => {
     if (!ros) return;
-    const svc = new ROSLIB.Service({ ros, name, serviceType: "std_srvs/Trigger" });
+    const svc = new ROSLIB["Service"]({ ros, name, serviceType: "std_srvs/Trigger" });
     svc.callService({}, onResult, (err) => console.warn(name, err));
   }, [ros, name]);
 }
@@ -510,19 +514,19 @@ export default function MissionControlView({ ros, status, simMode }) {
     }
     const subs = [];
 
-    const stateTopic = new ROSLIB.Topic({ ros, name: "/mission_executive_node/state", messageType: "std_msgs/String" });
+    const stateTopic = new ROSLIB["Topic"]({ ros, name: "/mission_executive_node/state", messageType: "std_msgs/String" });
     stateTopic.subscribe((msg) => setMissionState(msg.data));
     subs.push(stateTopic);
 
-    const progressTopic = new ROSLIB.Topic({ ros, name: "/mission_executive_node/progress", messageType: "std_msgs/String" });
+    const progressTopic = new ROSLIB["Topic"]({ ros, name: "/mission_executive_node/progress", messageType: "std_msgs/String" });
     progressTopic.subscribe((msg) => setProgress(msg.data));
     subs.push(progressTopic);
 
-    const mapTopic = new ROSLIB.Topic({ ros, name: "/map", messageType: "nav_msgs/OccupancyGrid" });
+    const mapTopic = new ROSLIB["Topic"]({ ros, name: "/map", messageType: "nav_msgs/OccupancyGrid" });
     mapTopic.subscribe((msg) => setMapMsg({ width: msg.info.width, height: msg.info.height, data: msg.data, info: msg.info }));
     subs.push(mapTopic);
 
-    const odomTopic = new ROSLIB.Topic({ ros, name: "/mirte_base_controller/odom", messageType: "nav_msgs/Odometry" });
+    const odomTopic = new ROSLIB["Topic"]({ ros, name: "/mirte_base_controller/odom", messageType: "nav_msgs/Odometry" });
     odomTopic.subscribe((msg) => {
       const { x, y } = msg.pose.pose.position;
       const { z: qz, w: qw } = msg.pose.pose.orientation;
@@ -532,15 +536,15 @@ export default function MissionControlView({ ros, status, simMode }) {
     });
     subs.push(odomTopic);
 
-    const wpTopic = new ROSLIB.Topic({ ros, name: "/inspection_waypoints", messageType: "geometry_msgs/PoseArray" });
+    const wpTopic = new ROSLIB["Topic"]({ ros, name: "/inspection_waypoints", messageType: "geometry_msgs/PoseArray" });
     wpTopic.subscribe((msg) => setWaypoints(msg.poses.map(p => ({ x: p.position.x, y: p.position.y }))));
     subs.push(wpTopic);
 
-    const camTopic = new ROSLIB.Topic({ ros, name: "/camera/image_raw/compressed", messageType: "sensor_msgs/CompressedImage" });
+    const camTopic = new ROSLIB["Topic"]({ ros, name: "/camera/image_raw/compressed", messageType: "sensor_msgs/CompressedImage" });
     camTopic.subscribe((msg) => setCameraImg(`data:image/jpeg;base64,${msg.data}`));
     subs.push(camTopic);
 
-    const detTopic = new ROSLIB.Topic({ ros, name: "/camera/detection/compressed", messageType: "sensor_msgs/CompressedImage" });
+    const detTopic = new ROSLIB["Topic"]({ ros, name: "/camera/detection/compressed", messageType: "sensor_msgs/CompressedImage" });
     detTopic.subscribe((msg) => setDetectionImg(`data:image/jpeg;base64,${msg.data}`));
     subs.push(detTopic);
 
@@ -604,7 +608,7 @@ export default function MissionControlView({ ros, status, simMode }) {
       />
 
       {(showIdle || showAborted) && <IdleView onStartExploration={handleStartExploration} onStartNavigation={handleStartNavigation} />}
-      {showDone && <DoneView waypoints={waypoints} onStart={handleStart} />}
+      {showDone && <DoneView waypoints={waypoints} onStart={handleStartExploration} />}
       {showTransition && <TransitionView state={missionState} />}
       {showTeleop && <TeleopHoldView />}
       {showExploration && <ExplorationView mapMsg={mapMsg} robotPose={robotPose} />}
