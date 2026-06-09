@@ -496,7 +496,7 @@ export default function MissionControlView({ ros, status, simMode }) {
 
   const callStartExploration    = useRosService(ros, "/mission_executive_node/start_exploration");
   const callStartNavigation    = useRosService(ros, "/mission_executive_node/start_navigation");
-  const callDone     = useRosService(ros, "/mission_executive_node/exploration_done");
+  const callDone     = useRosService(ros, "/mission_executive_node/skip_exploration");
   const callAbort    = useRosService(ros, "/mission_executive_node/abort");
 
   // Parse progress "3/8" → active waypoint index 2
