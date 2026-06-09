@@ -48,6 +48,16 @@ export function useColors() {
 
 export const SCAN_MAX_RANGE = 12;
 
+export function labelToColor(label) {
+  const l = (label || "").toLowerCase();
+  if (l.includes("bug") || l.includes("pest") || l.includes("disease")) return "#f87171";
+  if (l.includes("red") && l.includes("pink")) return "#e8567a"; // combined "red/pink" label
+  if (l.includes("pink"))  return "#ec4899";
+  if (l.includes("red"))   return "#dc2626";
+  if (l.includes("white")) return "#e2e8f0";
+  return "#8b9bc8";
+}
+
 export function useTopicHz() {
   const countRef = useRef(0);
   const [hz, setHz] = useState(null);
@@ -62,7 +72,7 @@ export function useTopicHz() {
   return { hz, tick };
 }
 
-export function MapCanvas({ mapMsg, robotPose, waypoints = [], activeWaypointIdx = -1 }) {
+export function MapCanvas({ mapMsg, robotPose, waypoints = [], activeWaypointIdx = -1, flowerDetections = [] }) {
   const COLORS = useColors();
   const canvasRef = useRef(null);
   useEffect(() => {
@@ -96,6 +106,21 @@ export function MapCanvas({ mapMsg, robotPose, waypoints = [], activeWaypointIdx
     const gridStep = 50;
     for (let gx = dx; gx < dx + width * scale; gx += gridStep) { ctx.beginPath(); ctx.moveTo(gx, dy); ctx.lineTo(gx, dy + height * scale); ctx.stroke(); }
     for (let gy = dy; gy < dy + height * scale; gy += gridStep) { ctx.beginPath(); ctx.moveTo(dx, gy); ctx.lineTo(dx + width * scale, gy); ctx.stroke(); }
+
+    // Object detections from /greenvision/xyz
+    if (flowerDetections.length > 0 && info) {
+      const res = info.resolution, ox = info.origin.position.x, oy = info.origin.position.y;
+      flowerDetections.forEach((det) => {
+        const cx = dx + (det.position.x - ox) / res * scale;
+        const cy = dy + (height - (det.position.y - oy) / res) * scale;
+        const color = labelToColor(det.label);
+        ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+        ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 8; ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,0.2)"; ctx.lineWidth = 0.5; ctx.stroke();
+      });
+    }
 
     // Waypoints
     if (waypoints.length > 0 && info) {
@@ -149,7 +174,7 @@ export function MapCanvas({ mapMsg, robotPose, waypoints = [], activeWaypointIdx
       ctx.fillStyle = COLORS.accent; ctx.shadowColor = COLORS.accent; ctx.shadowBlur = 8; ctx.fill();
       ctx.restore();
     }
-  }, [mapMsg, robotPose, waypoints, activeWaypointIdx, COLORS]);
+  }, [mapMsg, robotPose, waypoints, activeWaypointIdx, flowerDetections, COLORS]);
   return <canvas ref={canvasRef} width={640} height={480} style={{ width: "100%", height: "100%", display: "block", borderRadius: 4 }} />;
 }
 

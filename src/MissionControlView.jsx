@@ -1,10 +1,110 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import * as ROSLIB_NAMESPACE from "roslib";
-import { useColors, MapCanvas } from "./shared.jsx";
+import { useColors, MapCanvas, labelToColor } from "./shared.jsx";
 
 // Unpack the namespace context into a standard plain object using bracket notation strings.
 // This completely bypasses the production bundler's strict named-export validation flags.
 const ROSLIB = ROSLIB_NAMESPACE["default"] || ROSLIB_NAMESPACE;
+
+// ── Simulation data ──────────────────────────────────────────────────────────
+
+const SIM_MAP_DATA = (() => {
+  const W = 100, H = 100, RES = 0.05;
+  const data = new Array(W * H).fill(0);
+  const fill = (c, r) => { if (c >= 0 && c < W && r >= 0 && r < H) data[r * W + c] = 100; };
+  for (let i = 0; i < 100; i++)
+    for (let t = 0; t < 3; t++) { fill(t, i); fill(99 - t, i); fill(i, t); fill(i, 99 - t); }
+  for (let c = 6; c <= 22; c++) for (let r = 5; r <= 21; r++) if (c === 6 || c === 22 || r === 5 || r === 21) fill(c, r);
+  for (let c = 78; c <= 94; c++) for (let r = 77; r <= 93; r++) if (c === 78 || c === 94 || r === 77 || r === 93) fill(c, r);
+  for (let r = 29; r <= 69; r++) { fill(86, r); fill(87, r); }
+  return { width: W, height: H, data, info: { resolution: RES, width: W, height: H, origin: { position: { x: -2.5, y: -2.5, z: 0 } } } };
+})();
+
+// Approach positions outside each plant bed / wall stub
+const SIM_WAYPOINTS = [
+  { x: -1.8, y:  1.0 },  // south of top-left bed
+  { x: -1.0, y:  1.8 },  // east of top-left bed
+  { x:  1.5, y:  0.3 },  // west of wall stub, upper section
+  { x:  1.5, y: -0.6 },  // west of wall stub, lower section
+  { x:  1.0, y: -1.8 },  // west of bottom-right bed
+];
+
+// Flower / pest detections scattered across the three plant areas
+const SIM_DETECTIONS = [
+  { track_id: 1,  label: "red/pink", position: { x: -2.0, y: 1.9, z: 0.3 }, observations: 28 },
+  { track_id: 2,  label: "pink",     position: { x: -1.8, y: 1.9, z: 0.3 }, observations: 21 },
+  { track_id: 3,  label: "red",      position: { x: -1.6, y: 1.9, z: 0.3 }, observations: 34 },
+  { track_id: 4,  label: "white",    position: { x: -2.0, y: 1.6, z: 0.3 }, observations: 15 },
+  { track_id: 5,  label: "bug",      position: { x: -1.8, y: 1.6, z: 0.3 }, observations:  6 },
+  { track_id: 6,  label: "white",    position: { x: -1.6, y: 1.6, z: 0.3 }, observations: 19 },
+  { track_id: 7,  label: "red",      position: { x:  1.70, y:  0.7, z: 0.3 }, observations: 12 },
+  { track_id: 8,  label: "pink",     position: { x:  1.70, y:  0.0, z: 0.3 }, observations: 17 },
+  { track_id: 9,  label: "white",    position: { x:  1.70, y: -0.7, z: 0.3 }, observations: 22 },
+  { track_id: 10, label: "pink",     position: { x:  1.6,  y: -1.6, z: 0.3 }, observations:  9 },
+  { track_id: 11, label: "red/pink", position: { x:  1.9,  y: -1.6, z: 0.3 }, observations: 22 },
+  { track_id: 12, label: "red",      position: { x:  1.6,  y: -1.9, z: 0.3 }, observations: 11 },
+  { track_id: 13, label: "bug",      position: { x:  1.9,  y: -1.9, z: 0.3 }, observations:  4 },
+  { track_id: 14, label: "white",    position: { x:  2.05, y: -1.75, z: 0.3 }, observations: 16 },
+  { track_id: 15, label: "pink",     position: { x: -0.4,  y:  0.3, z: 0.3 }, observations:  8 },
+];
+
+const SIM_SENSOR_DATA = [
+  { temperature: 22.1, humidity: 58.2, co2: 412 },
+  { temperature: 23.5, humidity: 62.1, co2: 445 },
+  { temperature: 21.8, humidity: 55.8, co2: 398 },
+  { temperature: 22.4, humidity: 57.0, co2: 421 },
+  { temperature: 24.2, humidity: 64.5, co2: 461 },
+];
+
+function makeSimCameraImg(label) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 640; canvas.height = 480;
+  const ctx = canvas.getContext("2d");
+  const color = labelToColor(label);
+
+  // Background
+  const bg = ctx.createRadialGradient(320, 240, 30, 320, 240, 300);
+  bg.addColorStop(0, "#1a1c2a"); bg.addColorStop(1, "#0d0f14");
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, 640, 480);
+
+  // Flower glow blob
+  const fg = ctx.createRadialGradient(320, 230, 0, 320, 230, 90);
+  fg.addColorStop(0, color); fg.addColorStop(0.45, color + "66"); fg.addColorStop(1, color + "00");
+  ctx.beginPath(); ctx.arc(320, 230, 90, 0, Math.PI * 2);
+  ctx.fillStyle = fg; ctx.fill();
+
+  // Detection bounding box
+  ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.setLineDash([5, 3]);
+  ctx.strokeRect(205, 130, 230, 210); ctx.setLineDash([]);
+
+  // Corner marks
+  [[205, 130], [435, 130], [205, 340], [435, 340]].forEach(([bx, by]) => {
+    const sx = bx < 320 ? 1 : -1, sy = by < 280 ? 1 : -1;
+    ctx.beginPath(); ctx.moveTo(bx, by + sy * 14); ctx.lineTo(bx, by); ctx.lineTo(bx + sx * 14, by);
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+  });
+
+  // Label chip
+  ctx.fillStyle = color + "30"; ctx.fillRect(205, 105, label.length * 8 + 20, 22);
+  ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(205, 105, label.length * 8 + 20, 22);
+  ctx.fillStyle = color; ctx.font = "bold 12px monospace"; ctx.textAlign = "left";
+  ctx.fillText(label, 213, 120);
+
+  // Confidence
+  const conf = (0.85 + Math.random() * 0.12).toFixed(2);
+  ctx.fillStyle = "rgba(0,229,160,0.15)"; ctx.fillRect(205, 344, 112, 20);
+  ctx.strokeStyle = "rgba(0,229,160,0.5)"; ctx.lineWidth = 1; ctx.strokeRect(205, 344, 112, 20);
+  ctx.fillStyle = "#00e5a0"; ctx.font = "11px monospace";
+  ctx.fillText(`conf  ${conf}`, 213, 358);
+
+  // Watermark
+  ctx.fillStyle = "rgba(255,255,255,0.07)"; ctx.textAlign = "right"; ctx.font = "10px monospace";
+  ctx.fillText("● SIM", 630, 18);
+
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 const STATE_META = {
   IDLE:                   { label: "Idle",                    icon: "○", color: null,      desc: "System ready. Start a mission to begin autonomous greenhouse inspection." },
@@ -120,7 +220,49 @@ function StateHeader({ state, progress, onAbort, onStart, onStopExploration }) {
   );
 }
 
-function ExplorationView({ mapMsg, robotPose }) {
+function FlowerOverview({ detections }) {
+  const COLORS = useColors();
+  const groups = {};
+  detections.forEach(d => { const k = d.label || "unknown"; groups[k] = (groups[k] || 0) + 1; });
+  const sorted = Object.entries(groups).sort(([, a], [, b]) => b - a);
+  const total = detections.length;
+
+  return (
+    <div style={{ background: COLORS.surface, border: `0.5px solid ${COLORS.border}`, borderRadius: 8, padding: "12px 14px" }}>
+      <div style={{ fontSize: 10, color: COLORS.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, paddingBottom: 4, borderBottom: `0.5px solid ${COLORS.border}` }}>
+        detections
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: total > 0 ? 10 : 4 }}>
+        <span style={{ fontSize: 26, fontWeight: 500, color: COLORS.text, fontFamily: "monospace", lineHeight: 1 }}>{total}</span>
+        <span style={{ fontSize: 11, color: COLORS.textMuted }}>objects tracked</span>
+      </div>
+      {sorted.length === 0 ? (
+        <div style={{ fontSize: 11, color: COLORS.textDim }}>no detections yet</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {sorted.map(([label, count]) => {
+            const color = labelToColor(label);
+            const pct = total > 0 ? (count / total) * 100 : 0;
+            return (
+              <div key={label}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 3 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: color, boxShadow: `0 0 4px ${color}` }} />
+                  <span style={{ flex: 1, fontSize: 11, color: COLORS.textMuted, fontFamily: "monospace" }}>{label}</span>
+                  <span style={{ fontSize: 12, color: COLORS.text, fontFamily: "monospace", fontWeight: 500 }}>{count}</span>
+                </div>
+                <div style={{ height: 2, background: COLORS.border, borderRadius: 1, overflow: "hidden", marginLeft: 15 }}>
+                  <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 1, transition: "width 0.4s" }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExplorationView({ mapMsg, robotPose, flowerDetections = [] }) {
   const COLORS = useColors();
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef(Date.now());
@@ -151,7 +293,7 @@ function ExplorationView({ mapMsg, robotPose }) {
           borderRadius: 8, overflow: "hidden", minHeight: 300, position: "relative",
         }}>
           {mapMsg ? (
-            <MapCanvas mapMsg={mapMsg} robotPose={robotPose} />
+            <MapCanvas mapMsg={mapMsg} robotPose={robotPose} flowerDetections={flowerDetections} />
           ) : (
             <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12 }}>
               <div style={{ width: 40, height: 40, border: `1px solid ${COLORS.border}`, borderTop: `1px solid ${COLORS.accent}`, borderRadius: "50%", animation: "spin 1.2s linear infinite" }} />
@@ -224,7 +366,57 @@ function ExplorationView({ mapMsg, robotPose }) {
   );
 }
 
-function InspectionMapView({ mapMsg, robotPose, waypoints, activeWaypointIdx, state }) {
+function TagReadingsPanel({ tagReadings }) {
+  const COLORS = useColors();
+  const entries = Object.values(tagReadings).sort((a, b) => a.tag_id - b.tag_id);
+  if (entries.length === 0) return null;
+
+  return (
+    <div style={{ background: COLORS.surface, border: `0.5px solid ${COLORS.border}`, borderRadius: 8, padding: "12px 14px" }}>
+      <div style={{ fontSize: 10, color: COLORS.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, paddingBottom: 4, borderBottom: `0.5px solid ${COLORS.border}` }}>
+        sensor log
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 1, maxHeight: 180, overflowY: "auto" }}>
+        {entries.map(entry => {
+          const sd = entry.sensor_data || {};
+          return (
+            <div key={entry.tag_id} style={{ padding: "6px 0", borderBottom: `0.5px solid ${COLORS.border}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <span style={{ fontSize: 9, color: COLORS.accent, background: COLORS.accentDim, borderRadius: 2, padding: "1px 6px", fontFamily: "monospace" }}>
+                  tag #{entry.tag_id}
+                </span>
+                {entry.robot_position && (
+                  <span style={{ fontSize: 9, color: COLORS.textDim, fontFamily: "monospace" }}>
+                    {entry.robot_position.x?.toFixed(1)}, {entry.robot_position.y?.toFixed(1)}
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", paddingLeft: 2 }}>
+                {sd.temperature != null && (
+                  <span style={{ fontSize: 10, color: COLORS.textMuted }}>
+                    <span style={{ color: COLORS.warn, fontFamily: "monospace" }}>{sd.temperature.toFixed(1)}</span> °C
+                  </span>
+                )}
+                {sd.humidity != null && (
+                  <span style={{ fontSize: 10, color: COLORS.textMuted }}>
+                    <span style={{ color: "#60a5fa", fontFamily: "monospace" }}>{sd.humidity.toFixed(1)}</span> %
+                  </span>
+                )}
+                {sd.co2 != null && (
+                  <span style={{ fontSize: 10, color: COLORS.textMuted }}>
+                    <span style={{ color: "#4ade80", fontFamily: "monospace" }}>{sd.co2}</span> ppm
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function InspectionMapView({ mapMsg, robotPose, waypoints, activeWaypointIdx, state, flowerDetections = [], tagReadings = {} }) {
   const COLORS = useColors();
   const [cur, total] = activeWaypointIdx >= 0
     ? [activeWaypointIdx + 1, waypoints.length]
@@ -245,7 +437,7 @@ function InspectionMapView({ mapMsg, robotPose, waypoints, activeWaypointIdx, st
         </div>
         <div style={{ flex: 1, background: COLORS.surface, border: `0.5px solid ${COLORS.border}`, borderRadius: 8, overflow: "hidden", minHeight: 300 }}>
           {mapMsg ? (
-            <MapCanvas mapMsg={mapMsg} robotPose={robotPose} waypoints={waypoints} activeWaypointIdx={activeWaypointIdx} />
+            <MapCanvas mapMsg={mapMsg} robotPose={robotPose} waypoints={waypoints} activeWaypointIdx={activeWaypointIdx} flowerDetections={flowerDetections} />
           ) : (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ fontSize: 12, color: COLORS.textMuted }}>waiting for /map…</span>
@@ -255,6 +447,8 @@ function InspectionMapView({ mapMsg, robotPose, waypoints, activeWaypointIdx, st
       </div>
 
       <div style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+        <FlowerOverview detections={flowerDetections} />
+
         <div style={{ background: COLORS.surface, border: `0.5px solid ${COLORS.border}`, borderRadius: 8, padding: "12px 14px" }}>
           <div style={{ fontSize: 10, color: COLORS.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10, paddingBottom: 4, borderBottom: `0.5px solid ${COLORS.border}` }}>
             waypoints
@@ -287,6 +481,8 @@ function InspectionMapView({ mapMsg, robotPose, waypoints, activeWaypointIdx, st
           )}
         </div>
 
+        <TagReadingsPanel tagReadings={tagReadings} />
+
         {robotPose && (
           <div style={{ background: COLORS.surface, border: `0.5px solid ${COLORS.border}`, borderRadius: 8, padding: "12px 14px" }}>
             <div style={{ fontSize: 10, color: COLORS.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10, paddingBottom: 4, borderBottom: `0.5px solid ${COLORS.border}` }}>
@@ -313,7 +509,7 @@ function InspectionMapView({ mapMsg, robotPose, waypoints, activeWaypointIdx, st
   );
 }
 
-function TulipInspectionView({ cameraImg, detectionImg, mapMsg, robotPose, waypoints, activeWaypointIdx }) {
+function TulipInspectionView({ cameraImg, detectionImg, mapMsg, robotPose, waypoints, activeWaypointIdx, flowerDetections = [], sensorReadings = null }) {
   const COLORS = useColors();
   const [camMode, setCamMode] = useState("detection");
   const displayImg = camMode === "detection" ? (detectionImg || cameraImg) : cameraImg;
@@ -377,15 +573,45 @@ function TulipInspectionView({ cameraImg, detectionImg, mapMsg, robotPose, waypo
           )}
         </div>
 
+        {sensorReadings ? (
+          <div style={{ background: COLORS.surface, border: `0.5px solid ${COLORS.border}`, borderRadius: 8, padding: "10px 12px" }}>
+            <div style={{ fontSize: 10, color: COLORS.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8, paddingBottom: 4, borderBottom: `0.5px solid ${COLORS.border}` }}>
+              sensor readings
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {[
+                ["temperature", sensorReadings.temperature?.toFixed(1), "°C",  COLORS.warn],
+                ["humidity",    sensorReadings.humidity?.toFixed(1),    "%",   "#60a5fa"],
+                ["CO₂",        sensorReadings.co2,                     "ppm", "#4ade80"],
+              ].map(([k, v, u, c]) => v != null && (
+                <div key={k} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: c, flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 11, color: COLORS.textMuted }}>{k}</span>
+                  <span style={{ fontSize: 13, color: COLORS.text, fontFamily: "monospace", fontWeight: 500 }}>
+                    {v}<span style={{ fontSize: 10, color: COLORS.textDim, marginLeft: 2 }}>{u}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div style={{ background: COLORS.surface, border: `0.5px solid ${COLORS.border}`, borderRadius: 8, padding: "10px 12px" }}>
+            <div style={{ fontSize: 10, color: COLORS.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>sensor readings</div>
+            <div style={{ fontSize: 11, color: COLORS.textDim }}>waiting for sensor data…</div>
+          </div>
+        )}
+
         <div style={{ flex: 1, background: COLORS.surface, border: `0.5px solid ${COLORS.border}`, borderRadius: 8, overflow: "hidden", minHeight: 180 }}>
           {mapMsg ? (
-            <MapCanvas mapMsg={mapMsg} robotPose={robotPose} waypoints={waypoints} activeWaypointIdx={activeWaypointIdx} />
+            <MapCanvas mapMsg={mapMsg} robotPose={robotPose} waypoints={waypoints} activeWaypointIdx={activeWaypointIdx} flowerDetections={flowerDetections} />
           ) : (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ fontSize: 11, color: COLORS.textMuted }}>no map</span>
             </div>
           )}
         </div>
+
+        <FlowerOverview detections={flowerDetections} />
 
         <div style={{ background: "rgba(248,113,113,0.08)", border: "0.5px solid rgba(248,113,113,0.4)", borderRadius: 8, padding: "10px 12px" }}>
           <div style={{ fontSize: 10, color: "#f87171", letterSpacing: "0.08em", marginBottom: 4 }}>ml detections</div>
@@ -490,13 +716,16 @@ function DoneView({ waypoints, onStart }) {
 }
 
 export default function MissionControlView({ ros, status, simMode }) {
-  const [missionState, setMissionState] = useState(null); // null = waiting for latched state from ROS
-  const [progress, setProgress]         = useState(null);
-  const [mapMsg, setMapMsg]             = useState(null);
-  const [robotPose, setRobotPose]       = useState(null);
-  const [waypoints, setWaypoints]       = useState([]);
-  const [cameraImg, setCameraImg]       = useState(null);
-  const [detectionImg, setDetectionImg] = useState(null);
+  const [missionState, setMissionState]   = useState(null); // null = waiting for latched state from ROS
+  const [progress, setProgress]           = useState(null);
+  const [mapMsg, setMapMsg]               = useState(null);
+  const [robotPose, setRobotPose]         = useState(null);
+  const [waypoints, setWaypoints]         = useState([]);
+  const [cameraImg, setCameraImg]         = useState(null);
+  const [detectionImg, setDetectionImg]   = useState(null);
+  const [flowerDetections, setFlowerDetections] = useState([]);
+  const [sensorReadings, setSensorReadings]     = useState(null);
+  const [tagReadings, setTagReadings]           = useState({});  // { [tag_id]: { tag_id, sensor_data, robot_position } }
 
   const callStartExploration    = useRosService(ros, "/mission_executive_node/start_exploration");
   const callStartNavigation    = useRosService(ros, "/mission_executive_node/start_navigation");
@@ -508,8 +737,8 @@ export default function MissionControlView({ ros, status, simMode }) {
   const activeWaypointIdx = curWp > 0 ? curWp - 1 : -1;
 
   useEffect(() => {
-    if (!ros || status !== "connected") {
-      setMissionState(null); // clear stale state on disconnect
+    if (!ros || status !== "connected" || simMode) {
+      if (!simMode) { setMissionState(null); setFlowerDetections([]); setTagReadings({}); }
       return;
     }
     const subs = [];
@@ -548,18 +777,118 @@ export default function MissionControlView({ ros, status, simMode }) {
     detTopic.subscribe((msg) => setDetectionImg(`data:image/jpeg;base64,${msg.data}`));
     subs.push(detTopic);
 
-    return () => subs.forEach(s => s.unsubscribe());
-  }, [ros, status]);
+    // /greenvision/xyz — JSON-encoded std_msgs/String containing object detections
+    const xyzTopic = new ROSLIB["Topic"]({ ros, name: "/greenvision/xyz", messageType: "std_msgs/String" });
+    xyzTopic.subscribe((msg) => {
+      try { setFlowerDetections(JSON.parse(msg.data).objects || []); }
+      catch (e) { console.warn("/greenvision/xyz parse error:", e); }
+    });
+    subs.push(xyzTopic);
 
-  // Sim mode: show exploration state for preview without a real ROS connection
+    // AprilTag sensor readings — temperature (+ optional humidity / CO₂) per detected tag
+    const aprilTagTopic = new ROSLIB["Topic"]({ ros, name: "/data/apriltag", messageType: "std_msgs/String" });
+    aprilTagTopic.subscribe((msg) => {
+      try {
+        const data = JSON.parse(msg.data);
+        if (!data.detections?.length) return;
+        setSensorReadings(data.detections[0].sensor_data);
+        setTagReadings(prev => {
+          const next = { ...prev };
+          data.detections.forEach(det => {
+            if (det.sensor_data) next[det.id] = { tag_id: det.id, sensor_data: det.sensor_data, robot_position: data.robot_position };
+          });
+          return next;
+        });
+      } catch (e) { console.warn("/data/apriltag parse error:", e); }
+    });
+    subs.push(aprilTagTopic);
+
+    return () => subs.forEach(s => s.unsubscribe());
+  }, [ros, status, simMode]);
+
+  // Animated sim loop — runs only when simMode is on
   useEffect(() => {
-    if (simMode) {
-      setMissionState("EXPLORATION");
-      setProgress(null);
-    } else if (status !== "connected") {
-      setMissionState(null);
+    if (!simMode) {
+      if (status !== "connected") { setMissionState(null); setSensorReadings(null); }
+      return;
     }
-  }, [simMode, status]);
+
+    setMapMsg(SIM_MAP_DATA);
+    setFlowerDetections(SIM_DETECTIONS);
+    setWaypoints(SIM_WAYPOINTS);
+    setMissionState("INSPECTION");
+    setProgress(`1/${SIM_WAYPOINTS.length}`);
+
+    let wpIdx = 0, phase = "moving", rx = 0, ry = 0, phaseTicks = 0;
+
+    const id = setInterval(() => {
+      if (phase === "moving") {
+        const wp = SIM_WAYPOINTS[wpIdx];
+        const dx = wp.x - rx, dy = wp.y - ry;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 0.07) {
+          rx = wp.x; ry = wp.y;
+          phase = "inspecting"; phaseTicks = 0;
+          setMissionState("TULIP_INSPECTION");
+        } else {
+          const spd = 0.05;
+          rx += (dx / dist) * spd; ry += (dy / dist) * spd;
+          setRobotPose({ x: rx, y: ry, yaw: Math.atan2(dy, dx) - Math.PI / 2, speed: 0.12 });
+        }
+      } else if (phase === "inspecting") {
+        if (phaseTicks === 0) {
+          const wp = SIM_WAYPOINTS[wpIdx];
+          const nearest = SIM_DETECTIONS.reduce((best, d) => {
+            const dd = Math.hypot(d.position.x - wp.x, d.position.y - wp.y);
+            return dd < best.dist ? { d, dist: dd } : best;
+          }, { d: SIM_DETECTIONS[0], dist: Infinity }).d;
+          const img = makeSimCameraImg(nearest.label);
+          setCameraImg(img); setDetectionImg(img);
+          const sd = SIM_SENSOR_DATA[wpIdx % SIM_SENSOR_DATA.length];
+          setSensorReadings(sd);
+          const tagId = wpIdx + 1;
+          setTagReadings(prev => ({ ...prev, [tagId]: { tag_id: tagId, sensor_data: sd, robot_position: SIM_WAYPOINTS[wpIdx] } }));
+        }
+        phaseTicks++;
+        if (phaseTicks > 38) {
+          setCameraImg(null); setDetectionImg(null);
+          wpIdx++;
+          if (wpIdx >= SIM_WAYPOINTS.length) {
+            phase = "returning"; phaseTicks = 0;
+            setMissionState("RETURNING_HOME"); setProgress(null);
+          } else {
+            phase = "moving";
+            setMissionState("INSPECTION");
+            setProgress(`${wpIdx + 1}/${SIM_WAYPOINTS.length}`);
+          }
+        }
+      } else if (phase === "returning") {
+        const dx = -rx, dy = -ry;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 0.07) {
+          rx = 0; ry = 0;
+          setRobotPose({ x: 0, y: 0, yaw: 0, speed: 0 });
+          setMissionState("DONE"); phase = "done"; phaseTicks = 0;
+        } else {
+          const spd = 0.05;
+          rx += (dx / dist) * spd; ry += (dy / dist) * spd;
+          setRobotPose({ x: rx, y: ry, yaw: Math.atan2(dy, dx) - Math.PI / 2, speed: 0.12 });
+        }
+      } else if (phase === "done") {
+        phaseTicks++;
+        if (phaseTicks > 45) {
+          wpIdx = 0; rx = 0; ry = 0; phase = "moving"; phaseTicks = 0;
+          setMissionState("INSPECTION");
+          setProgress(`1/${SIM_WAYPOINTS.length}`);
+          setSensorReadings(null);
+          setTagReadings({});
+          setRobotPose({ x: 0, y: 0, yaw: 0, speed: 0 });
+        }
+      }
+    }, 100);
+
+    return () => clearInterval(id);
+  }, [simMode]);
 
   const handleStartNavigation = () => callStartNavigation((r) => console.log("start_mission:", r));
   const handleStartExploration = () => callStartExploration((r) => console.log("start_mission:", r));
@@ -611,7 +940,7 @@ export default function MissionControlView({ ros, status, simMode }) {
       {showDone && <DoneView waypoints={waypoints} onStart={handleStartExploration} />}
       {showTransition && <TransitionView state={missionState} />}
       {showTeleop && <TeleopHoldView />}
-      {showExploration && <ExplorationView mapMsg={mapMsg} robotPose={robotPose} />}
+      {showExploration && <ExplorationView mapMsg={mapMsg} robotPose={robotPose} flowerDetections={flowerDetections} />}
       {showMap && (
         <InspectionMapView
           mapMsg={mapMsg}
@@ -619,6 +948,8 @@ export default function MissionControlView({ ros, status, simMode }) {
           waypoints={waypoints}
           activeWaypointIdx={activeWaypointIdx}
           state={missionState}
+          flowerDetections={flowerDetections}
+          tagReadings={tagReadings}
         />
       )}
       {showTulip && (
@@ -629,6 +960,8 @@ export default function MissionControlView({ ros, status, simMode }) {
           robotPose={robotPose}
           waypoints={waypoints}
           activeWaypointIdx={activeWaypointIdx}
+          flowerDetections={flowerDetections}
+          sensorReadings={sensorReadings}
         />
       )}
 
