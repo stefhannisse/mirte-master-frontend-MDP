@@ -432,7 +432,7 @@ function TeleopHoldView() {
   );
 }
 
-function IdleView({ onStart }) {
+function IdleView({ onStartNavigation, onStartExploration }) {
   const COLORS = useColors();
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, padding: 40 }}>
@@ -443,13 +443,21 @@ function IdleView({ onStart }) {
           Press Start Mission to begin autonomous greenhouse inspection. The robot will explore, map, detect tulip boxes, and inspect each one.
         </div>
       </div>
-      <button onClick={onStart} style={{
+      <button onClick={onStartNavigation} style={{
         background: COLORS.accentDim, border: `0.5px solid ${COLORS.accent}`,
         borderRadius: 6, color: COLORS.accent, fontSize: 13,
         padding: "10px 28px", cursor: "pointer", fontFamily: "monospace",
         letterSpacing: "0.06em", transition: "all 0.2s",
       }}>
-        ▶ Start Mission
+        ▶ Start Navigation
+      </button>
+      <button onClick={onStartExploration} style={{
+        background: COLORS.accentDim, border: `0.5px solid ${COLORS.accent}`,
+        borderRadius: 6, color: COLORS.accent, fontSize: 13,
+        padding: "10px 28px", cursor: "pointer", fontFamily: "monospace",
+        letterSpacing: "0.06em", transition: "all 0.2s",
+      }}>
+        ▶ Start Exploration
       </button>
     </div>
   );
@@ -486,7 +494,8 @@ export default function MissionControlView({ ros, status, simMode }) {
   const [cameraImg, setCameraImg]       = useState(null);
   const [detectionImg, setDetectionImg] = useState(null);
 
-  const callStart    = useRosService(ros, "/mission_executive_node/start_mission");
+  const callStartExploration    = useRosService(ros, "/mission_executive_node/start_exploration");
+  const callStartNavigation    = useRosService(ros, "/mission_executive_node/start_navigation");
   const callDone     = useRosService(ros, "/mission_executive_node/exploration_done");
   const callAbort    = useRosService(ros, "/mission_executive_node/abort");
 
@@ -548,7 +557,8 @@ export default function MissionControlView({ ros, status, simMode }) {
     }
   }, [simMode, status]);
 
-  const handleStart = () => callStart((r) => console.log("start_mission:", r));
+  const handleStartNavigation = () => callStartNavigation((r) => console.log("start_mission:", r));
+  const handleStartExploration = () => callStartExploration((r) => console.log("start_mission:", r));
   const handleStop  = () => callDone((r) => console.log("exploration_done:", r));
   const handleAbort = () => callAbort((r) => { console.log("abort:", r); setMissionState("ABORTED"); });
 
@@ -589,11 +599,11 @@ export default function MissionControlView({ ros, status, simMode }) {
         state={missionState}
         progress={progress}
         onAbort={handleAbort}
-        onStart={handleStart}
+        onStart={handleStartExploration}
         onStopExploration={handleStop}
       />
 
-      {(showIdle || showAborted) && <IdleView onStart={handleStart} />}
+      {(showIdle || showAborted) && <IdleView onStartExploration={handleStartExploration} onStartNavigation={handleStartNavigation} />}
       {showDone && <DoneView waypoints={waypoints} onStart={handleStart} />}
       {showTransition && <TransitionView state={missionState} />}
       {showTeleop && <TeleopHoldView />}

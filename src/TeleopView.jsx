@@ -104,10 +104,11 @@ export default function TeleopView({ socket, ros, darkMode }) {
     if (!ros) return;
     const enable = !teleopEnabled;
     setTeleopPending(true);
-    const svc = new ROSLIB.Service({ ros, name: "/mission_executive_node/set_teleoperation", serviceType: "std_srvs/SetBool" });
+    const svc = new ROSLIB.Service({ ros, name: "/mission_executive_node/set_teleoperation", serviceType: "std_srvs/srv/SetBool" });
     svc.callService(
       { data: enable },
       (result) => {
+        console.log(result)
         if (result.success) setTeleopEnabled(enable);
         setTeleopPending(false);
       },
