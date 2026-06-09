@@ -3,17 +3,26 @@ import * as ROSLIB from "roslib";
 import { useColors, MapCanvas } from "./shared.jsx";
 
 const STATE_META = {
-  IDLE:              { label: "Idle",               icon: "○", color: null,      desc: "System ready. Start a mission to begin autonomous greenhouse inspection." },
-  EXPLORATION:       { label: "Exploring",          icon: "◎", color: "warn",    desc: "Building a map of the greenhouse using frontier-based exploration. The robot autonomously navigates to unmapped areas." },
-  PLANNING:          { label: "Planning Waypoints", icon: "◈", color: "accent",  desc: "Analyzing the completed map to detect tulip boxes and generate optimal approach poses for inspection." },
-  INSPECTION:        { label: "Navigating",         icon: "▶", color: "accent",  desc: "Navigating to the next tulip box inspection point using Nav2. The robot follows the computed path autonomously." },
-  TULIP_INSPECTION:  { label: "Inspecting",         icon: "◉", color: "warn",    desc: "Robot has arrived at the waypoint. Camera inspection in progress — detecting tulip health with the ML model." },
-  RETURNING_HOME:    { label: "Returning Home",     icon: "↩", color: "accent",  desc: "All waypoints visited. Navigating back to the start position." },
-  DONE:              { label: "Mission Complete",   icon: "✓", color: "success", desc: "Inspection complete. All tulip boxes have been visited and assessed." },
-  ABORTED:           { label: "Aborted",            icon: "✕", color: "error",   desc: "Mission was aborted." },
+  IDLE:                   { label: "Idle",                    icon: "○", color: null,      desc: "System ready. Start a mission to begin autonomous greenhouse inspection." },
+  STARTING_EXPLORATION:   { label: "Starting Exploration",    icon: "⋯", color: "warn",    desc: "Launching the frontier-based exploration stack…" },
+  EXPLORATION:            { label: "Exploring",               icon: "◎", color: "warn",    desc: "Building a map of the greenhouse using frontier-based exploration. The robot autonomously navigates to unmapped areas." },
+  STOPPING_EXPLORATION:   { label: "Stopping Exploration",    icon: "⋯", color: "warn",    desc: "Shutting down the exploration stack and waiting for stale nodes to disappear from the ROS graph." },
+  STARTING_NAVIGATION:    { label: "Starting Navigation",     icon: "⋯", color: "accent",  desc: "Launching map_server, AMCL, and Nav2 against the saved map and pose." },
+  PLANNING:               { label: "Planning Waypoints",      icon: "◈", color: "accent",  desc: "Analyzing the completed map to detect tulip boxes and generate optimal approach poses for inspection." },
+  INSPECTION:             { label: "Navigating",              icon: "▶", color: "accent",  desc: "Navigating to the next tulip box inspection point using Nav2. The robot follows the computed path autonomously." },
+  TULIP_INSPECTION:       { label: "Inspecting",              icon: "◉", color: "warn",    desc: "Robot has arrived at the waypoint. Camera inspection in progress — detecting tulip health with the ML model." },
+  RETURNING_HOME:         { label: "Returning Home",          icon: "↩", color: "accent",  desc: "All waypoints visited. Navigating back to the start position." },
+  ENTERING_TELEOPERATION: { label: "Entering Tele-operation", icon: "⋯", color: null,      desc: "Suspending autonomous operation and preparing for manual control." },
+  TELEOPERATION:          { label: "Tele-operation",          icon: "◌", color: null,      desc: "Autonomous mission paused. Robot is under manual operation via the Tele-op page." },
+  EXITING_TELEOPERATION:  { label: "Exiting Tele-operation",  icon: "⋯", color: null,      desc: "Leaving manual operation and restoring the suspended autonomous state." },
+  DONE:                   { label: "Mission Complete",        icon: "✓", color: "success", desc: "Inspection complete. All tulip boxes have been visited and assessed." },
+  ABORTED:                { label: "Aborted",                 icon: "✕", color: "error",   desc: "Mission was aborted." },
 };
 
-const ACTIVE_STATES = new Set(["EXPLORATION", "PLANNING", "INSPECTION", "TULIP_INSPECTION", "RETURNING_HOME"]);
+const ACTIVE_STATES = new Set([
+  "STARTING_EXPLORATION", "EXPLORATION", "STOPPING_EXPLORATION",
+  "STARTING_NAVIGATION", "PLANNING", "INSPECTION", "TULIP_INSPECTION", "RETURNING_HOME",
+]);
 
 function useRosService(ros, name) {
   return useCallback((onResult) => {
@@ -385,6 +394,44 @@ function TulipInspectionView({ cameraImg, detectionImg, mapMsg, robotPose, waypo
   );
 }
 
+const TRANSITION_STATES = new Set([
+  "STARTING_EXPLORATION", "STOPPING_EXPLORATION", "STARTING_NAVIGATION",
+  "ENTERING_TELEOPERATION", "EXITING_TELEOPERATION",
+]);
+
+function TransitionView({ state }) {
+  const COLORS = useColors();
+  const meta = STATE_META[state] || STATE_META.IDLE;
+  const stateColor =
+    meta.color === "accent" ? COLORS.accent :
+    meta.color === "warn"   ? COLORS.warn :
+    COLORS.textMuted;
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 40 }}>
+      <div style={{ width: 36, height: 36, border: `1px solid ${COLORS.border}`, borderTop: `1px solid ${stateColor}`, borderRadius: "50%", animation: "spin 1.2s linear infinite" }} />
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 13, color: stateColor, fontFamily: "monospace", marginBottom: 8, letterSpacing: "0.05em" }}>{meta.label}</div>
+        <div style={{ fontSize: 12, color: COLORS.textMuted, maxWidth: 380, lineHeight: 1.6 }}>{meta.desc}</div>
+      </div>
+    </div>
+  );
+}
+
+function TeleopHoldView() {
+  const COLORS = useColors();
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 40 }}>
+      <div style={{ fontSize: 40, color: COLORS.textDim }}>◌</div>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 13, color: COLORS.text, fontFamily: "monospace", marginBottom: 8 }}>Manual Operation Active</div>
+        <div style={{ fontSize: 12, color: COLORS.textMuted, maxWidth: 380, lineHeight: 1.6 }}>
+          Autonomous mission is paused. Switch to the Tele-op page to control the robot. Disable tele-operation there to resume the mission.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function IdleView({ onStart }) {
   const COLORS = useColors();
   return (
@@ -527,12 +574,14 @@ export default function MissionControlView({ ros, status, simMode }) {
     );
   }
 
-  const showMap = ["PLANNING", "INSPECTION", "RETURNING_HOME"].includes(missionState);
-  const showTulip = missionState === "TULIP_INSPECTION";
-  const showExploration = missionState === "EXPLORATION";
-  const showIdle = missionState === "IDLE";
-  const showDone = missionState === "DONE";
-  const showAborted = missionState === "ABORTED";
+  const showMap        = ["PLANNING", "INSPECTION", "RETURNING_HOME"].includes(missionState);
+  const showTulip      = missionState === "TULIP_INSPECTION";
+  const showExploration= missionState === "EXPLORATION";
+  const showIdle       = missionState === "IDLE";
+  const showDone       = missionState === "DONE";
+  const showAborted    = missionState === "ABORTED";
+  const showTransition = TRANSITION_STATES.has(missionState);
+  const showTeleop     = missionState === "TELEOPERATION";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
@@ -546,6 +595,8 @@ export default function MissionControlView({ ros, status, simMode }) {
 
       {(showIdle || showAborted) && <IdleView onStart={handleStart} />}
       {showDone && <DoneView waypoints={waypoints} onStart={handleStart} />}
+      {showTransition && <TransitionView state={missionState} />}
+      {showTeleop && <TeleopHoldView />}
       {showExploration && <ExplorationView mapMsg={mapMsg} robotPose={robotPose} />}
       {showMap && (
         <InspectionMapView
@@ -567,7 +618,7 @@ export default function MissionControlView({ ros, status, simMode }) {
         />
       )}
 
-      {/* PLANNING transition state */}
+      {/* PLANNING — waiting for first waypoint */}
       {missionState === "PLANNING" && waypoints.length === 0 && (
         <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", textAlign: "center" }}>
           <div style={{ width: 32, height: 32, border: `1px solid ${COLORS.border}`, borderTop: `1px solid ${COLORS.accent}`, borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 10px" }} />

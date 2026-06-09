@@ -202,7 +202,7 @@ function RosDashboardInner({ darkMode, setDarkMode }) {
       {/* ── Active View ─────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {view === "mission" && <MissionControlView ros={ros} status={status} simMode={simMode} />}
-        {view === "teleop"  && <TeleopView socket={socket} darkMode={darkMode} />}
+        {view === "teleop"  && <TeleopView socket={socket} ros={ros} darkMode={darkMode} />}
         {view === "sensors" && <SensorsView ros={ros} status={status} simMode={simMode} />}
       </div>
 

@@ -102,6 +102,53 @@ export default function SensorsView({ ros, status, simMode }) {
   const tfHz   = useTopicHz();
 
   useEffect(() => {
+    // 1. Initialize the secure connection over your Cloudflare tunnel
+    const ros = new ROSLIB.Ros({
+      url: 'wss://ruth-halloween-procurement-compare.trycloudflare.com'
+    });
+
+    // 2. Set up the service client for listing topics
+    const topicsClient = new ROSLIB.Service({
+      ros: ros,
+      name: '/rosapi/topics',
+      serviceType: 'rosapi/Topics'
+    });
+
+    // 3. Define connection event listeners
+    ros.on('connection', () => {
+      // setStatus('Connected! Fetching topics...');
+      
+      // Call the service once connected
+      const request = new ROSLIB.ServiceRequest({});
+      topicsClient.callService(request, 
+        (result) => {
+          console.log(result)
+          // setTopics(result.topics);
+          // setStatus('Connected');
+        }, 
+        (error) => {
+          console.error('Failed to call /rosapi/topics:', error);
+          setStatus('Error fetching topics');
+        }
+      );
+    });
+
+    ros.on('error', (error) => {
+      console.error('Rosbridge Connection Error:', error);
+      setStatus('Connection Error');
+    });
+
+    ros.on('close', () => {
+      setStatus('Disconnected');
+    });
+
+    // 4. Cleanup: Close the websocket connection if the component unmounts
+    return () => {
+      ros.close();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!ros || status !== "connected" || simMode) return;
     const subs = [];
 

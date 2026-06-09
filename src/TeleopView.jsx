@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from "react";
+import * as ROSLIB from "roslib";
 import { useRobotScene } from "./useRobotScene.js";
 import { useColors } from "./shared.jsx";
 
@@ -51,16 +52,18 @@ const BUTTON_LABELS = {
   rotateCW: "↻", rotateCCW: "↺", stop: "■",
 };
 
-export default function TeleopView({ socket, darkMode }) {
+export default function TeleopView({ socket, ros, darkMode }) {
   const COLORS = useColors();
   const mountRef = useRef(null);
   const sceneControlsRef = useRef(null);
-  
+
   // Reference tracker to store our continuous 50ms driving loop ID
-  const intervalRef = useRef(null); 
+  const intervalRef = useRef(null);
 
   const [activeDir, setActiveDir] = useState(null);
   const [armState, setArmState] = useState({ base: 0, shoulder: 0, elbow: 0, wrist: 0, gripper: 0 });
+  const [teleopEnabled, setTeleopEnabled] = useState(false);
+  const [teleopPending, setTeleopPending] = useState(false);
 
   const { driveRef, rendererRef, groundMatRef, gridRef } = useRobotScene(mountRef, sceneControlsRef);
 
@@ -86,6 +89,34 @@ export default function TeleopView({ socket, darkMode }) {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, []);
+
+  // Disable teleop in the FSM when navigating away from this view
+  useEffect(() => {
+    return () => {
+      if (!ros) return;
+      const svc = new ROSLIB.Service({ ros, name: "/mission_executive_node/set_teleoperation", serviceType: "std_srvs/SetBool" });
+      svc.callService({ data: false }, () => {}, () => {});
+      setTeleopEnabled(false);
+    };
+  }, [ros]);
+
+  const toggleTeleop = useCallback(() => {
+    if (!ros) return;
+    const enable = !teleopEnabled;
+    setTeleopPending(true);
+    const svc = new ROSLIB.Service({ ros, name: "/mission_executive_node/set_teleoperation", serviceType: "std_srvs/SetBool" });
+    svc.callService(
+      { data: enable },
+      (result) => {
+        if (result.success) setTeleopEnabled(enable);
+        setTeleopPending(false);
+      },
+      (err) => {
+        console.warn("set_teleoperation error:", err);
+        setTeleopPending(false);
+      },
+    );
+  }, [ros, teleopEnabled]);
 
   // Arm Control Logic (via roslibjs bridge pipeline)
   const updateArm = useCallback((key, deg) => {
@@ -142,7 +173,7 @@ export default function TeleopView({ socket, darkMode }) {
       if (socket && socket.isConnected) {
         socket.callOnConnection({
           op: "publish",
-          topic: "/mirte_base_controller/cmd_vel_unstamped",
+          topic: "/cmd_vel/teleop_raw",
           type: "geometry_msgs/msg/Twist",
           msg: {
             linear: { x: vec.vx, y: vec.vy, z: 0.0 },
@@ -197,51 +228,92 @@ export default function TeleopView({ socket, darkMode }) {
         padding: "14px 16px",
         display: "flex", flexDirection: "column", gap: 18,
       }}>
-        {/* Arm UI Sliders Section */}
-        <div>
-          <div style={{ fontSize: 10, color: COLORS.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12, paddingBottom: 4, borderBottom: `0.5px solid ${COLORS.border}` }}>
-            arm control
+        {/* Teleoperation Enable/Disable Toggle */}
+        <div style={{
+          borderRadius: 6,
+          border: `0.5px solid ${teleopEnabled ? COLORS.accent : COLORS.border}`,
+          background: teleopEnabled ? COLORS.accentDim : "transparent",
+          padding: "10px 12px",
+        }}>
+          <div style={{ fontSize: 10, color: COLORS.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>
+            teleoperation
           </div>
-          <ArmSlider label="Base rotation"  min={-180} max={180} value={armState.base}     onChange={(v) => updateArm("base", v)} />
-          <ArmSlider label="Shoulder pitch" min={-90}  max={90}  value={armState.shoulder} onChange={(v) => updateArm("shoulder", v)} />
-          <ArmSlider label="Elbow pitch"    min={-120} max={120} value={armState.elbow}    onChange={(v) => updateArm("elbow", v)} />
-          <ArmSlider label="Wrist pitch"    min={-90}  max={90}  value={armState.wrist}    onChange={(v) => updateArm("wrist", v)} />
-          <ArmSlider label="Gripper open"   min={0}    max={40}  value={armState.gripper}  unit=" mm" onChange={(v) => updateArm("gripper", v)} />
+          <div style={{ fontSize: 11, color: teleopEnabled ? COLORS.accent : COLORS.textMuted, marginBottom: 10, lineHeight: 1.5 }}>
+            {teleopEnabled
+              ? "● Active — controls are live. Autonomous mission is paused."
+              : "○ Disabled — enable to activate controls and pause autonomous mission."}
+          </div>
+          <button
+            onClick={toggleTeleop}
+            disabled={!ros || teleopPending}
+            style={{
+              width: "100%",
+              background: teleopEnabled ? "rgba(248,113,113,0.12)" : COLORS.accentDim,
+              border: `0.5px solid ${teleopEnabled ? "#f87171" : COLORS.accent}`,
+              borderRadius: 4,
+              color: teleopEnabled ? "#f87171" : COLORS.accent,
+              fontSize: 12, padding: "6px 0", cursor: ros && !teleopPending ? "pointer" : "not-allowed",
+              fontFamily: "monospace", letterSpacing: "0.05em",
+              opacity: !ros || teleopPending ? 0.5 : 1,
+              transition: "all 0.2s",
+            }}
+          >
+            {teleopPending ? "…" : teleopEnabled ? "✕ Disable Teleoperation" : "▶ Enable Teleoperation"}
+          </button>
+          {!ros && (
+            <div style={{ fontSize: 10, color: COLORS.textDim, marginTop: 6, textAlign: "center" }}>
+              connect to rosbridge first
+            </div>
+          )}
         </div>
 
-        {/* Mecanum Grid Buttons Section */}
-        <div>
-          <div style={{ fontSize: 10, color: COLORS.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12, paddingBottom: 4, borderBottom: `0.5px solid ${COLORS.border}` }}>
-            mecanum drive
+        {/* Controls — gated on teleopEnabled */}
+        <div style={{ opacity: teleopEnabled ? 1 : 0.35, pointerEvents: teleopEnabled ? "auto" : "none", display: "flex", flexDirection: "column", gap: 18, transition: "opacity 0.2s" }}>
+          {/* Arm UI Sliders Section */}
+          <div>
+            <div style={{ fontSize: 10, color: COLORS.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12, paddingBottom: 4, borderBottom: `0.5px solid ${COLORS.border}` }}>
+              arm control
+            </div>
+            <ArmSlider label="Base rotation"  min={-180} max={180} value={armState.base}     onChange={(v) => updateArm("base", v)} />
+            <ArmSlider label="Shoulder pitch" min={-90}  max={90}  value={armState.shoulder} onChange={(v) => updateArm("shoulder", v)} />
+            <ArmSlider label="Elbow pitch"    min={-120} max={120} value={armState.elbow}    onChange={(v) => updateArm("elbow", v)} />
+            <ArmSlider label="Wrist pitch"    min={-90}  max={90}  value={armState.wrist}    onChange={(v) => updateArm("wrist", v)} />
+            <ArmSlider label="Gripper open"   min={0}    max={40}  value={armState.gripper}  unit=" mm" onChange={(v) => updateArm("gripper", v)} />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4 }}>
-            {DRIVE_BUTTONS.flat().map((dir, i) => {
-              if (!dir) return <div key={i} />;
-              const isStop = dir === "stop";
-              const isActive = activeDir === dir;
-              return (
-                <button
-                  key={dir}
-                  // Using unified Pointer Events to cleanly handle mouse and touch systems flawlessly
-                  onPointerDown={() => handleDrive(dir)}
-                  onPointerUp={isStop ? undefined : handleDriveStop}
-                  onPointerLeave={isStop ? undefined : handleDriveStop}
-                  style={{
-                    padding: "8px 0", fontSize: 16, cursor: "pointer", borderRadius: 4,
-                    border: `0.5px solid ${isActive ? COLORS.accent : COLORS.border}`,
-                    background: isActive ? COLORS.accentDim : isStop ? COLORS.surface : "transparent",
-                    color: isActive ? COLORS.accent : isStop ? COLORS.warn : COLORS.text,
-                    fontFamily: "monospace", transition: "all 0.1s",
-                    touchAction: "none" // Prevents default browser zooming gestures on mobile touch overlays
-                  }}
-                >
-                  {BUTTON_LABELS[dir]}
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ marginTop: 8, fontSize: 10, color: COLORS.textDim, textAlign: "center" }}>
-            hold to drive · release to stop
+
+          {/* Mecanum Grid Buttons Section */}
+          <div>
+            <div style={{ fontSize: 10, color: COLORS.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12, paddingBottom: 4, borderBottom: `0.5px solid ${COLORS.border}` }}>
+              mecanum drive
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4 }}>
+              {DRIVE_BUTTONS.flat().map((dir, i) => {
+                if (!dir) return <div key={i} />;
+                const isStop = dir === "stop";
+                const isActive = activeDir === dir;
+                return (
+                  <button
+                    key={dir}
+                    onPointerDown={() => handleDrive(dir)}
+                    onPointerUp={isStop ? undefined : handleDriveStop}
+                    onPointerLeave={isStop ? undefined : handleDriveStop}
+                    style={{
+                      padding: "8px 0", fontSize: 16, cursor: "pointer", borderRadius: 4,
+                      border: `0.5px solid ${isActive ? COLORS.accent : COLORS.border}`,
+                      background: isActive ? COLORS.accentDim : isStop ? COLORS.surface : "transparent",
+                      color: isActive ? COLORS.accent : isStop ? COLORS.warn : COLORS.text,
+                      fontFamily: "monospace", transition: "all 0.1s",
+                      touchAction: "none",
+                    }}
+                  >
+                    {BUTTON_LABELS[dir]}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 8, fontSize: 10, color: COLORS.textDim, textAlign: "center" }}>
+              hold to drive · release to stop
+            </div>
           </div>
         </div>
 
