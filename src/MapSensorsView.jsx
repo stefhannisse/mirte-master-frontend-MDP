@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
-import * as ROSLIB_NAMESPACE from "roslib";
+import * as ROSLIB from "roslib";
 import { MapCanvas, ScanCanvas, TopicRow, StatCard, SectionLabel, useTopicHz, useColors } from "./shared.jsx";
-
-// Unpack the namespace context into a standard plain object using bracket notation strings.
-// This completely bypasses the production bundler's strict named-export validation flags.
-const ROSLIB = ROSLIB_NAMESPACE["default"] || ROSLIB_NAMESPACE;
 
 // ── Simulation data ──────────────────────────────────────────────────────────
 

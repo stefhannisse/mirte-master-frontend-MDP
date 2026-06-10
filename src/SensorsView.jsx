@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
-import * as ROSLIB_NAMESPACE from "roslib";
+import * as ROSLIB from "roslib";
 import { MapCanvas, ScanCanvas, useTopicHz, useColors } from "./shared.jsx";
-
-// Unpack the namespace into a plain object using bracket notation.
-// This ensures that modern bundlers don't strip out methods during minification.
-const ROSLIB = ROSLIB_NAMESPACE["default"] || ROSLIB_NAMESPACE;
 
 // Same sim data as MapSensorsView for consistency
 const SIM_MAP = (() => {

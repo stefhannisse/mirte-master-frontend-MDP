@@ -4,15 +4,11 @@
 */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import * as ROSLIB_NAMESPACE from "roslib"; // Assigned to a unique namespace variant
+import * as ROSLIB from "roslib";
 import { ThemeProvider, useColors, StatusDot } from "./shared.jsx";
 import MissionControlView from "./MissionControlView.jsx";
 import TeleopView from "./TeleopView.jsx";
 import SensorsView from "./SensorsView.jsx";
-
-// Unpack the namespace context into a standard plain object using bracket notation strings.
-// This completely bypasses the production bundler's strict named-export validation flags.
-const ROSLIB = ROSLIB_NAMESPACE["default"] || ROSLIB_NAMESPACE;
 
 const DEFAULT_WS = "ws://localhost:9090";
 
